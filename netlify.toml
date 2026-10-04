@@ -35,3 +35,5 @@
   from = "/*"
   to = "/404.html"
   status = 404
+
+# deploy-trigger-2026-10-04-2038
