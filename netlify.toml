@@ -1,5 +1,5 @@
 [build]
-  command = "unzip -oq code-self-admin-netlify.zip -d ."
+  command = "rm -rf .site-build && mkdir .site-build && unzip -oq code-self-admin-netlify.zip -d .site-build && cp -a .site-build/. . && rm -rf .site-build"
   publish = "."
   functions = "netlify/functions"
 
