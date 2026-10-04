@@ -1,0 +1,37 @@
+[build]
+  command = "unzip -oq code-self-admin-netlify.zip -d ."
+  publish = "."
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+[[redirects]]
+  from = "/api/catalog"
+  to = "/.netlify/functions/catalog"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin"
+  to = "/.netlify/functions/admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/analytics"
+  to = "/.netlify/functions/analytics"
+  status = 200
+
+[[redirects]]
+  from = "/api/policies"
+  to = "/.netlify/functions/policies"
+  status = 200
+
+[[redirects]]
+  from = "/api/site"
+  to = "/.netlify/functions/site"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/404.html"
+  status = 404
