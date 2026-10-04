@@ -12,114 +12,31 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Extract and patch site
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract website source
         shell: bash
         run: |
           set -euo pipefail
-          if [ -f code-self-admin-netlify.zip ]; then
-            unzip -oq code-self-admin-netlify.zip -d site
-            cp -a site/. .
-            rm -rf site
-          fi
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          root=Path('.')
-          p=root/'data/products.json'
-          if p.exists():
-            products=json.loads(p.read_text())
-            for x in products:
-              x['published']=False
-              if 'example.com' in x.get('kreatoUrl',''):
-                x['kreatoUrl']=''
-            p.write_text(json.dumps(products,indent=2,ensure_ascii=False)+'\n')
-          p=root/'netlify/functions/catalog.mjs'
-          if p.exists():
-            s=p.read_text()
-            old='''function publicCatalog(products) {
-  return products.map(({ price, ...safe }) => safe);
-}'''
-            new='''function isValidPurchaseUrl(value) {
-  try {
-    const u = new URL(String(value || ""));
-    return u.protocol === "https:" && !u.hostname.endsWith("example.com");
-  } catch { return false; }
-}
+          test -f code-self-admin-netlify.zip
+          unzip -oq code-self-admin-netlify.zip -d /tmp/site
+          cp -a /tmp/site/. .
+          rm -f code-self-admin-netlify.zip kreato-fontstore-netlify-ready.zip README.validation.txt
+          test -f index.html
+          test -f netlify.toml
+          test -d netlify/functions
 
-function publicCatalog(products) {
-  return products
-    .filter(p => p.published !== false && isValidPurchaseUrl(p.kreatoUrl))
-    .map(({ price, ...safe }) => safe);
-}'''
-            if old in s: s=s.replace(old,new)
-            p.write_text(s)
-          p=root/'assets/js/product.js'
-          if p.exists():
-            s=p.read_text()
-            old='''      <a class="btn btn-primary" href="${esc(p.kreatoUrl)}" target="_blank" rel="noopener noreferrer">Buy on Kreato ↗</a>
-      <p class="notice">This website does not process payments or create accounts. Please review the product information on Kreato before purchasing.</p>'''
-            new='''      ${/^https:\\/\\/[^\\s]+$/.test(p.kreatoUrl||"") ? \`<a class="btn btn-primary" href="${esc(p.kreatoUrl)}" target="_blank" rel="noopener noreferrer">Buy on Kreato ↗</a><p class="notice">Payment, delivery and invoice handling are completed on the external Kreato product page.</p>\` : \`<span class="btn btn-secondary" aria-disabled="true">Purchase link unavailable</span><p class="notice">This product is not currently available for purchase. Please check back later.</p>\`}'''
-            if old in s: s=s.replace(old,new)
-            old2='''  addJsonLd({"@context":"https://schema.org","@type":"Product","name":p.name,"description":p.description,"image":p.previewImages,"category":cat?.name,"url":p.kreatoUrl});'''
-            new2='''  const productLd={"@context":"https://schema.org","@type":"Product","name":p.name,"description":p.description,"image":p.previewImages,"category":cat?.name};
-  if(/^https:\/\//.test(p.kreatoUrl||"")) productLd.url=p.kreatoUrl;
-  addJsonLd(productLd);'''
-            if old2 in s: s=s.replace(old2,new2)
-            p.write_text(s)
-          p=root/'admin/index.html'
-          if p.exists():
-            s=p.read_text()
-            s=s.replace('<th>Name</th><th>Slug</th><th>Price</th><th>Kreato URL</th><th></th>','<th>Name</th><th>Slug</th><th>Price</th><th>Kreato URL</th><th>Published</th><th></th>')
-            s=s.replace('''<td><input data-k="kreatoUrl" value="${esc(p.kreatoUrl||'')}"></td><td><button class="btn btn-secondary danger remove">Remove</button></td>''','''<td><input data-k="kreatoUrl" value="${esc(p.kreatoUrl||'')}" placeholder="https://kreato.com/..."></td><td><input data-k="published" type="checkbox" ${p.published!==false?"checked":""}></td><td><button class="btn btn-secondary danger remove">Remove</button></td>''')
-            s=s.replace("el=>state.products[i][el.dataset.k]=el.value","el=>state.products[i][el.dataset.k]=el.type==='checkbox'?el.checked:el.value")
-            s=s.replace("kreatoUrl:'',altText:'Product preview'","kreatoUrl:'',published:false,altText:'Product preview'")
-            oldsave="$('#save-products').onclick=async()=>{try{collectProducts();await save({products:state.products});}catch(e){status.textContent=e.message;}};"
-            newsave='''$('#save-products').onclick=async()=>{try{collectProducts();
-  for(const p of state.products){
-    const u=String(p.kreatoUrl||'').trim();
-    if(p.published && !/^https:\/\/[^\\s]+$/.test(u)) throw new Error(`Cannot publish “${p.name}”: add a valid HTTPS Kreato URL first.`);
-    if(!String(p.name||'').trim()) throw new Error('Every product needs a name.');
-    if(!String(p.slug||'').trim()) throw new Error(`Product “${p.name}” needs a slug.`);
-  }
-  await save({products:state.products});}catch(e){status.textContent=e.message;}};'''
-            if oldsave in s: s=s.replace(oldsave,newsave)
-            p.write_text(s)
-          p=root/'netlify/functions/admin.mjs'
-          if p.exists():
-            s=p.read_text()
-            old='''  if (body.products) await store.setJSON(CATALOG, body.products);'''
-            new='''  if (body.products) {
-    if (!Array.isArray(body.products)) return Response.json({error:"products must be an array"},{status:400});
-    for (const p of body.products) {
-      if (!p || !String(p.name || "").trim() || !String(p.slug || "").trim())
-        return Response.json({error:"Every product needs a name and slug"},{status:400});
-      if (p.published) {
-        try {
-          const u = new URL(String(p.kreatoUrl || ""));
-          if (u.protocol !== "https:" || u.hostname.endsWith("example.com")) throw new Error();
-        } catch {
-          return Response.json({error:`Published product "${String(p.name)}" needs a valid HTTPS purchase URL`},{status:400});
-        }
-      }
-    }
-    await store.setJSON(CATALOG, body.products);
-  }'''
-            if old in s: s=s.replace(old,new)
-            p.write_text(s)
-          Path('code-self-admin-netlify.zip').unlink(missing_ok=True)
-          Path('kreato-fontstore-netlify-ready.zip').unlink(missing_ok=True)
-          Path('README.validation.txt').unlink(missing_ok=True)
-          PY
-      - name: Commit prepared source
+      - name: Commit extracted source
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "Prepare deployable store and harden buying flow"
+            git commit -m "Extract deployable website source"
             git push
           fi
